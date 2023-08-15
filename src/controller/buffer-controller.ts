@@ -236,22 +236,26 @@ export default class BufferController implements ComponentAPI {
 
   protected onBufferReset() {
     this.getSourceBufferTypes().forEach((type) => {
-      const sb = this.sourceBuffer[type];
-      try {
-        if (sb) {
-          this.removeBufferListeners(type);
-          if (this.mediaSource) {
-            this.mediaSource.removeSourceBuffer(sb);
-          }
-          // Synchronously remove the SB from the map before the next call in order to prevent an async function from
-          // accessing it
-          this.sourceBuffer[type] = undefined;
-        }
-      } catch (err) {
-        this.warn(`Failed to reset the ${type} buffer`, err);
-      }
+      this.resetBuffer(type);
     });
     this._initSourceBuffer();
+  }
+
+  private resetBuffer(type: SourceBufferName) {
+    const sb = this.sourceBuffer[type];
+    try {
+      if (sb) {
+        this.removeBufferListeners(type);
+        // Synchronously remove the SB from the map before the next call in order to prevent an async function from
+        // accessing it
+        this.sourceBuffer[type] = undefined;
+        if (this.mediaSource?.sourceBuffers.length) {
+          this.mediaSource.removeSourceBuffer(sb);
+        }
+      }
+    } catch (err) {
+      this.warn(`onBufferReset ${type}`, err);
+    }
   }
 
   protected onBufferCodecs(
@@ -834,6 +838,10 @@ export default class BufferController implements ComponentAPI {
   }
 
   private _onSBUpdateEnd(type: SourceBufferName) {
+    if (this.mediaSource?.readyState === 'closed') {
+      this.resetBuffer(type);
+      return;
+    }
     const { operationQueue } = this;
     const operation = operationQueue.current(type);
     operation.onComplete();
@@ -882,7 +890,7 @@ export default class BufferController implements ComponentAPI {
       : Infinity;
     const removeStart = Math.max(0, startOffset);
     const removeEnd = Math.min(endOffset, mediaDuration, msDuration);
-    if (removeEnd > removeStart && !sb.ending) {
+    if (removeEnd > removeStart && (!sb.ending || sb.ended)) {
       sb.ended = false;
       this.log(
         `Removing [${removeStart},${removeEnd}] from the ${type} SourceBuffer`
